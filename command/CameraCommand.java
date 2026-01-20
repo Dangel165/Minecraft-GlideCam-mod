@@ -213,8 +213,6 @@ public class CameraCommand {
         return 1;
     }
     
-    // Waypoint 명령어 구현은 다음 파일에 계속...
-    
     private static int addWaypointCurrent(CommandContext<CommandSourceStack> ctx) {
         String name = StringArgumentType.getString(ctx, "name");
         Entity entity = ctx.getSource().getEntity();
@@ -612,3 +610,4 @@ public class CameraCommand {
         return 1;
     }
 }
+
