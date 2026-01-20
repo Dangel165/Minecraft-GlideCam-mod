@@ -155,12 +155,6 @@ MIT License
 
 버그 리포트나 기능 제안은 GitHub Issues를 통해 제출해주세요.
 
-## 크레딧
-
-- Catmull-Rom 스플라인 보간
-- Minecraft Forge API
-- 커뮤니티 피드백
-
 ---
 
 **즐거운 영상 제작 되세요! 🎬**
