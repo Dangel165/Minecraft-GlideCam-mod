@@ -112,6 +112,11 @@ public class CameraCommand {
                         .then(Commands.argument("distance", FloatArgumentType.floatArg(1.0f, 50.0f))
                             .executes(ctx -> trackEntity(ctx, true, 
                                 FloatArgumentType.getFloat(ctx, "distance"))))))
+                .then(Commands.literal("train")
+                    .executes(ctx -> trackNearestTrain(ctx, 5.0f))
+                    .then(Commands.argument("distance", FloatArgumentType.floatArg(1.0f, 50.0f))
+                        .executes(ctx -> trackNearestTrain(ctx, 
+                            FloatArgumentType.getFloat(ctx, "distance")))))
                 .then(Commands.literal("stop")
                     .executes(ctx -> stopTracking(ctx))))
             
@@ -212,6 +217,8 @@ public class CameraCommand {
         }
         return 1;
     }
+    
+    // Waypoint 명령어 구현은 다음 파일에 계속...
     
     private static int addWaypointCurrent(CommandContext<CommandSourceStack> ctx) {
         String name = StringArgumentType.getString(ctx, "name");
@@ -451,12 +458,29 @@ public class CameraCommand {
     private static int trackEntity(CommandContext<CommandSourceStack> ctx, boolean follow, float distance) {
         try {
             Entity entity = EntityArgument.getEntity(ctx, "entity");
-            if (ctx.getSource().getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
-                com.cinematiccamera.network.NetworkHandler.sendToPlayer(
-                    com.cinematiccamera.network.TrackEntityPacket.track(entity.getId(), follow, distance), player);
+            
+            // 서버 사이드에서만 패킷 전송
+            if (!ctx.getSource().getLevel().isClientSide()) {
+                try {
+                    if (ctx.getSource().getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
+                        // 특정 플레이어가 명령어 실행
+                        com.cinematiccamera.network.NetworkHandler.sendToPlayer(
+                            com.cinematiccamera.network.TrackEntityPacket.track(entity.getId(), follow, distance), player);
+                    } else {
+                        // 커맨드 블록이나 콘솔에서 실행: 모든 플레이어에게 전송
+                        com.cinematiccamera.network.NetworkHandler.sendToAllPlayers(
+                            com.cinematiccamera.network.TrackEntityPacket.track(entity.getId(), follow, distance));
+                    }
+                } catch (ExceptionInInitializerError | IllegalStateException e) {
+                    // NetworkHandler 초기화 실패 - 무시하고 계속
+                    ctx.getSource().sendFailure(Component.literal("§c네트워크 초기화 오류 - 서버 재시작 필요"));
+                    return 0;
+                }
             } else {
+                // 클라이언트 사이드: 직접 실행
                 CameraController.trackEntity(entity, follow, distance);
             }
+            
             String mode = follow ? String.format("따라가기 (거리: %.1f)", distance) : "바라보기";
             ctx.getSource().sendSuccess(() -> 
                 Component.literal(String.format("§a엔티티 추적 시작: %s (%s)", 
@@ -464,6 +488,51 @@ public class CameraCommand {
             return 1;
         } catch (Exception e) {
             ctx.getSource().sendFailure(Component.literal("§c엔티티를 찾을 수 없습니다"));
+            return 0;
+        }
+    }
+    
+    private static int trackNearestTrain(CommandContext<CommandSourceStack> ctx, float distance) {
+        try {
+            Entity source = ctx.getSource().getEntity();
+            if (source == null) {
+                ctx.getSource().sendFailure(Component.literal("§c플레이어만 이 명령어를 사용할 수 있습니다"));
+                return 0;
+            }
+            
+            // 가장 가까운 기차 찾기 (25블록 반경)
+            Entity nearestTrain = ctx.getSource().getLevel().getEntities(source, 
+                source.getBoundingBox().inflate(25.0), 
+                entity -> entity.getType().toString().contains("carriage_contraption"))
+                .stream()
+                .min((e1, e2) -> Double.compare(
+                    e1.distanceToSqr(source), 
+                    e2.distanceToSqr(source)))
+                .orElse(null);
+            
+            if (nearestTrain == null) {
+                ctx.getSource().sendFailure(Component.literal("§c근처에 기차를 찾을 수 없습니다 (25블록 반경)"));
+                return 0;
+            }
+            
+            // 서버 사이드에서 실행 중인지 확인
+            if (!ctx.getSource().getLevel().isClientSide()) {
+                if (ctx.getSource().getEntity() instanceof net.minecraft.server.level.ServerPlayer player) {
+                    com.cinematiccamera.network.NetworkHandler.sendToPlayer(
+                        com.cinematiccamera.network.TrackEntityPacket.track(nearestTrain.getId(), true, distance), player);
+                } else {
+                    com.cinematiccamera.network.NetworkHandler.sendToAllPlayers(
+                        com.cinematiccamera.network.TrackEntityPacket.track(nearestTrain.getId(), true, distance));
+                }
+            } else {
+                CameraController.trackEntity(nearestTrain, true, distance);
+            }
+            
+            ctx.getSource().sendSuccess(() -> 
+                Component.literal(String.format("§a기차 추적 시작 (거리: %.1f블록)", distance)), false);
+            return 1;
+        } catch (Exception e) {
+            ctx.getSource().sendFailure(Component.literal("§c기차 추적 실패: " + e.getMessage()));
             return 0;
         }
     }
@@ -604,10 +673,10 @@ public class CameraCommand {
         ctx.getSource().sendSuccess(() -> Component.literal("§f/camera path list §7- 경로 목록"), true);
         ctx.getSource().sendSuccess(() -> Component.literal("§f/camera play <path> §7- 경로 재생"), true);
         ctx.getSource().sendSuccess(() -> Component.literal("§f/camera track <entity> §7- 엔티티 추적"), true);
+        ctx.getSource().sendSuccess(() -> Component.literal("§f/camera track train [거리] §7- 가장 가까운 기차 추적"), true);
         ctx.getSource().sendSuccess(() -> Component.literal("§f/camera lookat <x> <y> <z> §7- 좌표 바라보기"), true);
         ctx.getSource().sendSuccess(() -> Component.literal("§f/camera fov <value> §7- FOV 설정"), true);
         ctx.getSource().sendSuccess(() -> Component.literal("§f/camera info §7- 현재 카메라 정보"), true);
         return 1;
     }
 }
-
